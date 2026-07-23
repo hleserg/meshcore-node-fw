@@ -79,6 +79,23 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  site:
+    name: Check site build
+    runs-on: ubuntu-latest
+    # Runs on pull requests too. The pages job only fires on main and tags, so
+    # without this a broken guide render or a lost section would not surface
+    # until after the merge - which is exactly when the site is live.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install markdown pymdown-extensions
+      - name: Build and verify the site
+        run: python scripts/build_site.py
+      - name: Render the fixture guide
+        run: python scripts/render_guide.py tests/fixture_guide.md /tmp/fixture.html --title Fixture
+
   release:
     name: Publish release
     needs: build
@@ -102,8 +119,8 @@ jobs:
             artifacts/manifest.json
 
   pages:
-    name: Deploy flasher page
-    needs: build
+    name: Deploy field hub
+    needs: [build, site]
     # A pull request must prove both firmwares still build, but must never
     # publish to the live site - only merged code and tags deploy.
     if: github.event_name != 'pull_request'
@@ -126,13 +143,23 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # The page is served straight out of docs/ with the freshly built binaries
-      # dropped in beside index.html, so it always offers the current firmware.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install site build deps
+        run: pip install markdown pymdown-extensions
+
+      # The flasher is served with the binaries this run just built, so the page
+      # never offers a stale image. The guides are rendered from the Markdown in
+      # the repo, so editing the Markdown is all it takes to update them.
       - name: Assemble site
         run: |
           cp artifacts/t114-companion.uf2 docs/
           cp artifacts/v4-factory.bin docs/
           cp artifacts/manifest.json docs/
+          cp MESHCORE_TESTING.md MESHCORE_MARK.md docs/ 2>/dev/null || true
+          python scripts/build_site.py
           ls -l docs
 
       - uses: actions/configure-pages@v5
