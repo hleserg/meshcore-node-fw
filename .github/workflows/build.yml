@@ -103,6 +103,13 @@ jobs:
     name: Deploy flasher page
     needs: build
     runs-on: ubuntu-latest
+    # GitHub Pages accepts one deployment at a time. Pushing a commit and a tag
+    # together starts two runs whose top-level concurrency groups differ (they
+    # are keyed on the ref), so without this they race and one deploy is
+    # rejected. Queue instead of cancelling, so the tagged build still lands.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
