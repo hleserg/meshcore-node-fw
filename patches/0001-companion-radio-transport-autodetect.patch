@@ -13,7 +13,7 @@ index 0eee45ae..900c90af 100644
    bool hasConnection() const { return _connected; }
    uint16_t getBattMilliVolts() const { return _board->getBattMilliVolts(); }
 diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
-index ef9b6bfc..cb28ace5 100644
+index ef9b6bfc..dc591c32 100644
 --- a/examples/companion_radio/main.cpp
 +++ b/examples/companion_radio/main.cpp
 @@ -34,8 +34,52 @@ static uint32_t _atoi(const char* sp) {
@@ -115,43 +115,10 @@ index ef9b6bfc..cb28ace5 100644
    #else
      #include <helpers/ArduinoSerialInterface.h>
      ArduinoSerialInterface serial_interface;
-@@ -85,6 +154,94 @@ static uint32_t _atoi(const char* sp) {
+@@ -85,6 +154,87 @@ static uint32_t _atoi(const char* sp) {
    #error "need to define a serial interface"
  #endif
  
-+#if defined(SERIAL_RX)
-+  // Report the companion UART assignment over USB-CDC at boot. On nRF52 the
-+  // Arduino pin number is an index into g_ADigitalPinMap, so the silkscreen
-+  // label, the Arduino number and the actual port pin can all disagree - print
-+  // the resolved port pin rather than the number we were handed.
-+  #define _MC_STR2(x) #x
-+  #define _MC_STR(x) _MC_STR2(x)
-+
-+  static void printCompanionSerialBanner() {
-+    uint32_t t0 = millis();
-+    while (!Serial && millis() - t0 < 1500) { delay(10); }  // let the host attach
-+
-+    Serial.println();
-+    Serial.println("=== MeshCore companion :: hardware UART ===");
-+    Serial.printf("firmware  : %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
-+  #if defined(NRF52_PLATFORM)
-+    Serial.printf("port      : %s (NRF_UARTE)\n", _MC_STR(COMPANION_SERIAL));
-+    uint32_t rx = g_ADigitalPinMap[SERIAL_RX], tx = g_ADigitalPinMap[SERIAL_TX];
-+    Serial.printf("RX        : arduino %d -> P%d.%02d\n", SERIAL_RX, rx / 32, rx % 32);
-+    Serial.printf("TX        : arduino %d -> P%d.%02d\n", SERIAL_TX, tx / 32, tx % 32);
-+  #else
-+    Serial.printf("port      : UART%s\n", _MC_STR(COMPANION_SERIAL_NUM));
-+    Serial.printf("RX        : GPIO%d\n", SERIAL_RX);
-+    Serial.printf("TX        : GPIO%d\n", SERIAL_TX);
-+  #endif
-+    Serial.println("baud      : 115200 8N1");
-+    Serial.println("wiring    : board RX <- adapter TX, board TX -> adapter RX, GND <-> GND");
-+    Serial.println("note      : companion protocol is on the UART above, NOT on this USB port");
-+    Serial.println("==========================================");
-+    Serial.flush();
-+  }
-+#endif
-+
 +#if defined(TRANSPORT_DETECT_PIN)
 +  // Report what was detected and which pins are in play, over USB-CDC. On nRF52
 +  // the Arduino pin number is an index into g_ADigitalPinMap, so the silkscreen
@@ -159,6 +126,24 @@ index ef9b6bfc..cb28ace5 100644
 +  // the resolved port pin rather than echoing the number we were handed.
 +  #define _MC_STR2(x) #x
 +  #define _MC_STR(x) _MC_STR2(x)
++
++  // Connector positions for the banner. Boards pass the actual header labels so
++  // the printout can be held against the soldering; they come from the same
++  // build flags as the pin numbers, so the two cannot drift apart.
++  #ifndef DETECT_PIN_LABEL
++    #define DETECT_PIN_LABEL "GPIO" _MC_STR(TRANSPORT_DETECT_PIN)
++  #endif
++  #ifndef SERIAL_RX_LABEL
++    #define SERIAL_RX_LABEL "GPIO" _MC_STR(SERIAL_RX)
++  #endif
++  #ifndef SERIAL_TX_LABEL
++    #define SERIAL_TX_LABEL "GPIO" _MC_STR(SERIAL_TX)
++  #endif
++  #if defined(ESP32)
++    #define RADIO_MODE_LABEL "wifi-ap"
++  #else
++    #define RADIO_MODE_LABEL "ble"
++  #endif
 +
 +  #if defined(NRF52_PLATFORM)
 +    static void printPin(const char* label, uint32_t arduino_pin) {
@@ -178,6 +163,14 @@ index ef9b6bfc..cb28ace5 100644
 +    Serial.println();
 +    Serial.println("=== MeshCore companion :: transport auto-detect ===");
 +    Serial.printf("firmware  : %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
++
++    // One line to hold against the soldered wires, with header positions.
++    Serial.printf("DETECT=%s = %s -> %s | UART RX=%s, TX=%s\n",
++                  DETECT_PIN_LABEL,
++                  transport_is_wired ? "HIGH" : "LOW",
++                  transport_is_wired ? "serial" : RADIO_MODE_LABEL,
++                  SERIAL_RX_LABEL, SERIAL_TX_LABEL);
++
 +    printPin("detect", TRANSPORT_DETECT_PIN);
 +    Serial.printf("detect    : %s\n", transport_is_wired ? "HIGH (something wired)" : "LOW (nothing wired)");
 +    if (transport_is_wired) {
@@ -210,7 +203,7 @@ index ef9b6bfc..cb28ace5 100644
  /* GLOBAL OBJECTS */
  #ifdef DISPLAY_CLASS
    #include "UITask.h"
-@@ -114,6 +271,23 @@ void halt() {
+@@ -114,6 +264,23 @@ void halt() {
  void setup() {
    Serial.begin(115200);
  
@@ -234,7 +227,7 @@ index ef9b6bfc..cb28ace5 100644
    board.begin();
  
  #ifdef DISPLAY_CLASS
-@@ -156,8 +330,20 @@ void setup() {
+@@ -156,8 +323,20 @@ void setup() {
      #endif
    );
  
@@ -256,7 +249,7 @@ index ef9b6bfc..cb28ace5 100644
  #else
    serial_interface.begin(Serial);
  #endif
-@@ -199,7 +385,26 @@ void setup() {
+@@ -199,7 +378,26 @@ void setup() {
      #endif
    );
  
@@ -283,17 +276,6 @@ index ef9b6bfc..cb28ace5 100644
 +#elif defined(WIFI_SSID)
    board.setInhibitSleep(true);   // prevent sleep when WiFi is active
    WiFi.setAutoReconnect(true);
- 
-@@ -239,6 +444,10 @@ void setup() {
-   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
- #endif
- 
-+#if defined(SERIAL_RX)
-+  printCompanionSerialBanner();
-+#endif
-+
-   board.onBootComplete();
- }
  
 diff --git a/examples/companion_radio/ui-new/UITask.cpp b/examples/companion_radio/ui-new/UITask.cpp
 index 7c842019..0156ea93 100644

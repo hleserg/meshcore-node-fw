@@ -174,44 +174,65 @@ RP2040, но для nRF52 её нет: там либо BLE, либо `serial_int
 `HardwareSerial companion_serial(COMPANION_SERIAL_NUM)` с дефолтом `1`
 (поведение апстрима не меняется).
 
-## Распиновка UART и почему именно такие пины
+## Распиновка — ЗАФИКСИРОВАНА
 
-3.3 В, 115200 8N1. RX платы идёт на TX адаптера и наоборот.
+Паяется ровно по этим номерам. Всё на одном хедере на каждой плате.
 
-### T114 — `Serial2` (NRF_UARTE1), P0.09 / P0.10
+**T114 (nRF52840) — хедер P1**
 
-Хедер P1, силк `GPIO9` / `GPIO10`.
+| Сигнал | Позиция | GPIO | nRF |
+|---|---|---|---|
+| GND | P1 пин 4 | — | — |
+| **DETECT** | P1 пин 8 | `GPIO33` | P1.01 |
+| RX (плата ← TX адаптера) | P1 пин 12 | `GPIO9` | P0.09, UART1_RX |
+| TX (плата → RX адаптера) | P1 пин 13 | `GPIO10` | P0.10, UART1_TX |
 
-Это маркировка Heltec, а не номер Arduino-пина, поэтому идентификаторы взяты из
-дерева платы, а не подставлены вслепую:
+**V4 (ESP32-S3) — хедер J2**
 
-- `variants/heltec_t114/variant.h` объявляет
-  `PIN_SERIAL2_RX (9)` и `PIN_SERIAL2_TX (10)`;
-- `variants/heltec_t114/variant.cpp` задаёт `g_ADigitalPinMap[]`, который для
-  индексов ≥ 2 является тождественным: Arduino-пин `N` → порт-пин `P0.N`.
+| Сигнал | Позиция | GPIO |
+|---|---|---|
+| GND | J2 пин 1 | — |
+| **DETECT** | J2 пин 12 | `GPIO33` |
+| RX (плата ← TX адаптера) | J2 пин 13 | `GPIO47` |
+| TX (плата → RX адаптера) | J2 пин 14 | `GPIO48` |
 
-Значит Arduino-пины 9 и 10 — это ровно `P0.09` и `P0.10`, то есть те самые
-площадки на хедере.
+3.3 В, UART 115200 8N1.
 
-**Почему `Serial2`, а не `Serial1`.** `Serial1` (NRF_UARTE0) на этой плате занят
-GPS: `variants/heltec_t114/target.cpp` создаёт на нём `MicroNMEALocationProvider`,
-а `EnvironmentSensorManager` делает `Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX)`.
-Перевесить `Serial1` на 9/10 значило бы отобрать порт у GPS-драйвера, который тут
-же вернул бы его обратно. У nRF52840 есть второй UARTE, `Serial2` объявляется
-ядром при наличии `PIN_SERIAL2_RX`/`TX` — его и используем. Переопределяется через
-`-D COMPANION_SERIAL=SerialX`.
+Источники: [датасheet T114](https://resource.heltec.cn/download/Mesh_Node_T114/Datasheet.pdf)
+§2.2 и [датасheet V4](https://resource.heltec.cn/download/WiFi_LoRa_32_V4/datasheet/WiFi_LoRa_32_V4.2.0.pdf)
+§2.2.1 (J2). Сверено с `variants/heltec_t114/variant.h`: `g_ADigitalPinMap` — тождественное
+отображение, поэтому Arduino 33 → P1.01, Arduino 9/10 → P0.09/P0.10, ровно как в датасheet.
+Heltec-овский «UART1» — это `NRF_UARTE1`, который ядро Adafruit отдаёт как `Serial2`
+(`Serial1` = `NRF_UARTE0` занят GPS).
 
-**NFC.** `P0.09`/`P0.10` после сброса принадлежат NFC-антенне и как GPIO не
-работают. Освобождает их `-D CONFIG_NFCT_PINS_AS_GPIOS`: флаг доходит до
-`cores/nRF5/nordic/nrfx/mdk/system_nrf52840.c` в составе фреймворка, тот при
-первом старте однократно переписывает `UICR->NFCPINS` и перезагружает чип.
+На V4 сознательно не используются: `GPIO26` (J2 пин 15) — SPICS1 на линии флеша,
+`GPIO19`/`GPIO20` — нативный USB D−/D+, `GPIO0` — strapping/PRG.
 
-### V4 — UART2, GPIO47 / GPIO48
 
-Хедер J3. Здесь `Serial1` тоже занят GPS (тот же `EnvironmentSensorManager`),
-поэтому companion переехал на UART2 через `-D COMPANION_SERIAL_NUM=2`.
-Пины назначаются в рантайме через `companion_serial.setPins(SERIAL_RX, SERIAL_TX)`,
-так что дефолтная распиновка UART2 роли не играет.
+## NFC-пины — обязательная проверка
+
+`P0.09`/`P0.10` на nRF52840 после сброса сконфигурированы как выводы NFC-антенны, а не
+как GPIO. Без флага UART на них не заработает — **молча, без единой ошибки при сборке**.
+
+Что найдено в дереве:
+
+| Где искал | Есть `CONFIG_NFCT_PINS_AS_GPIOS`? |
+|---|---|
+| `variants/heltec_t114/variant.h` | нет |
+| `boards/heltec_t114.json` | нет |
+| апстримный `platformio.ini` | нет |
+| фреймворк `framework-arduinoadafruitnrf52` | только *потребитель* — `cores/nRF5/nordic/nrfx/mdk/system_nrf52840.c`, определения по умолчанию нет |
+
+**Вывод: флаг нигде не выставлен, его обязаны добавить мы.** Он стоит в
+`[env:t114_companion]`. Проверено, что он реально доходит до нужного файла:
+
+```bash
+pio run -e t114_companion -v | grep system_nrf52840
+# в команде компиляции присутствует -DCONFIG_NFCT_PINS_AS_GPIOS
+```
+
+При первом старте `system_nrf52840.c` однократно перепишет `UICR->NFCPINS` и перезагрузит
+чип — плата на пару секунд «задумается», это нормально и происходит один раз.
 
 ## Проверка self-info по UART
 

@@ -16,7 +16,7 @@
 | ✓ | T114: UART ↔ BLE | В elf есть и `ArduinoSerialInterface`, и `SerialBLEInterface` |
 | ✓ | V4: UART ↔ WiFi-точка | В elf есть `ArduinoSerialInterface`, `SerialWifiInterface` и 15 символов `softAP` |
 | ✓ | Пины из официального датасheet | T114 Rev 1.0 §2.2: `0.09 → GPIO9, UART1_RX`; сверено с `variant.h` |
-| ✓ | DETECT на том же хедере, что UART | T114 → GPIO13 (P0.13) на P1; V4 → GPIO33 |
+| ✓ | DETECT на том же хедере, что UART | T114 → GPIO33 (P1.01) на P1 пин 8; V4 → GPIO33 на J2 пин 12 |
 | ✓ | NFC-пины освобождены | Проверено `pio run -v`, что `CONFIG_NFCT_PINS_AS_GPIOS` доходит до `system_nrf52840.c` |
 | ✓ | Стартовый лог с detect/транспортом/пинами | Форматные строки обеих веток найдены в бинарях |
 | ✓ | Три образа собираются | Локально и в CI |
@@ -51,14 +51,15 @@
 ```
 === MeshCore companion :: transport auto-detect ===
 firmware  : v0.2.0-… (…)
-detect    : arduino 13  -> P0.13        <- на V4 будет "GPIO33"
+DETECT=GPIO33 (P1 pin 8) = LOW -> ble | UART RX=GPIO9 (P1 pin 12), TX=GPIO10 (P1 pin 13)
+detect    : arduino 33  -> P1.01
 detect    : LOW (nothing wired)
-transport : BLE                          <- на V4 будет "WiFi access point + TCP server"
+transport : BLE
 note      : pull the detect pin HIGH and reboot to use the wire
 ==================================================
 ```
 
-**Это и есть сверка «силк ≠ Arduino-пин».** Если на T114 видишь `P0.13` для detect и
+**Это и есть сверка «силк ≠ Arduino-пин».** Если на T114 видишь `P1.01` для detect и
 `P0.09`/`P0.10` для UART — распиновка та, что заявлена, можно паять.
 Если что-то другое — стоп, пришли мне вывод, дальше не иди.
 
@@ -71,12 +72,23 @@ note      : pull the detect pin HIGH and reboot to use the wire
 
 **С проводом** (detect подтянут к 3.3 В → HIGH), провода:
 
-| | T114 (хедер P1) | V4 |
+**T114 — всё на хедере P1:**
+
+| Сигнал | Позиция | GPIO |
 |---|---|---|
-| DETECT | `GPIO13` ← 3.3 В | `GPIO33` ← 3.3 В |
-| RX платы | `GPIO9` ← TX адаптера | `GPIO47` ← TX адаптера |
-| TX платы | `GPIO10` → RX адаптера | `GPIO48` → RX адаптера |
-| GND | P1·4 ↔ GND | J2·1 ↔ GND |
+| GND | P1 пин 4 | — |
+| DETECT ← 3.3 В | P1 пин 8 | `GPIO33` (P1.01) |
+| RX ← TX адаптера | P1 пин 12 | `GPIO9` (P0.09) |
+| TX → RX адаптера | P1 пин 13 | `GPIO10` (P0.10) |
+
+**V4 — всё на хедере J2:**
+
+| Сигнал | Позиция | GPIO |
+|---|---|---|
+| GND | J2 пин 1 | — |
+| DETECT ← 3.3 В | J2 пин 12 | `GPIO33` |
+| RX ← TX адаптера | J2 пин 13 | `GPIO47` |
+| TX → RX адаптера | J2 пин 14 | `GPIO48` |
 
 Перезагрузи ноду (смена режима только через ребут), проверь лог — должно быть
 `HIGH` и `HARDWARE UART`. Потом:
