@@ -13,10 +13,10 @@ index 0eee45ae..900c90af 100644
    bool hasConnection() const { return _connected; }
    uint16_t getBattMilliVolts() const { return _board->getBattMilliVolts(); }
 diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
-index ef9b6bfc..dc591c32 100644
+index ef9b6bfc..20b60252 100644
 --- a/examples/companion_radio/main.cpp
 +++ b/examples/companion_radio/main.cpp
-@@ -34,8 +34,52 @@ static uint32_t _atoi(const char* sp) {
+@@ -34,8 +34,60 @@ static uint32_t _atoi(const char* sp) {
    DataStore store(SPIFFS, rtc_clock);
  #endif
  
@@ -66,11 +66,19 @@ index ef9b6bfc..dc591c32 100644
 +    #ifndef WIFI_AP_PREFIX
 +      #define WIFI_AP_PREFIX "MeshCore-"
 +    #endif
++    // The passphrase lives in exactly one place - the board's build flags - so
++    // changing it is a one-line edit. An open AP would put the companion
++    // interface, and everything it can do to the node, in reach of anyone.
++    #ifdef WIFI_AP_PASSWORD
++      #define WIFI_AP_PASSWORD_STR WIFI_AP_PASSWORD
++    #else
++      #define WIFI_AP_PASSWORD_STR "(OPEN NETWORK - no passphrase set)"
++    #endif
 +  #elif defined(WIFI_SSID)
      #include <helpers/esp32/SerialWifiInterface.h>
      SerialWifiInterface serial_interface;
      #ifndef TCP_PORT
-@@ -47,7 +91,12 @@ static uint32_t _atoi(const char* sp) {
+@@ -47,7 +99,12 @@ static uint32_t _atoi(const char* sp) {
    #elif defined(SERIAL_RX)
      #include <helpers/ArduinoSerialInterface.h>
      ArduinoSerialInterface serial_interface;
@@ -84,7 +92,7 @@ index ef9b6bfc..dc591c32 100644
    #else
      #include <helpers/ArduinoSerialInterface.h>
      ArduinoSerialInterface serial_interface;
-@@ -71,9 +120,29 @@ static uint32_t _atoi(const char* sp) {
+@@ -71,9 +128,29 @@ static uint32_t _atoi(const char* sp) {
      ArduinoSerialInterface serial_interface;
    #endif
  #elif defined(NRF52_PLATFORM)
@@ -115,7 +123,7 @@ index ef9b6bfc..dc591c32 100644
    #else
      #include <helpers/ArduinoSerialInterface.h>
      ArduinoSerialInterface serial_interface;
-@@ -85,6 +154,87 @@ static uint32_t _atoi(const char* sp) {
+@@ -85,6 +162,87 @@ static uint32_t _atoi(const char* sp) {
    #error "need to define a serial interface"
  #endif
  
@@ -203,7 +211,7 @@ index ef9b6bfc..dc591c32 100644
  /* GLOBAL OBJECTS */
  #ifdef DISPLAY_CLASS
    #include "UITask.h"
-@@ -114,6 +264,23 @@ void halt() {
+@@ -114,6 +272,23 @@ void halt() {
  void setup() {
    Serial.begin(115200);
  
@@ -227,7 +235,7 @@ index ef9b6bfc..dc591c32 100644
    board.begin();
  
  #ifdef DISPLAY_CLASS
-@@ -156,8 +323,20 @@ void setup() {
+@@ -156,8 +331,20 @@ void setup() {
      #endif
    );
  
@@ -249,7 +257,7 @@ index ef9b6bfc..dc591c32 100644
  #else
    serial_interface.begin(Serial);
  #endif
-@@ -199,7 +378,26 @@ void setup() {
+@@ -199,7 +386,37 @@ void setup() {
      #endif
    );
  
@@ -267,18 +275,29 @@ index ef9b6bfc..dc591c32 100644
 +    snprintf(ap_ssid, sizeof(ap_ssid), WIFI_AP_PREFIX "%s", the_mesh.getNodePrefs()->node_name);
 +    WiFi.mode(WIFI_AP);
 +  #ifdef WIFI_AP_PASSWORD
-+    WiFi.softAP(ap_ssid, WIFI_AP_PASSWORD);
++    bool ap_up = WiFi.softAP(ap_ssid, WIFI_AP_PASSWORD);
 +  #else
-+    WiFi.softAP(ap_ssid);
++    bool ap_up = WiFi.softAP(ap_ssid);
 +  #endif
 +    serial_wireless.begin(TCP_PORT);
++
++    // Printed here rather than in the boot banner because the SSID is built from
++    // the node name, which only exists once the mesh has loaded its prefs.
++    Serial.printf("wifi ap   : SSID=%s  pass=%s\n", ap_ssid, WIFI_AP_PASSWORD_STR);
++    Serial.printf("logger    : %s:%d\n", WiFi.softAPIP().toString().c_str(), TCP_PORT);
++    if (!ap_up) {
++      // esp_wifi refuses a WPA2 passphrase shorter than 8 characters and falls
++      // back to an OPEN network - say so loudly instead of quietly shipping one.
++      Serial.println("wifi ap   : *** FAILED TO START - check the passphrase (>= 8 chars) ***");
++    }
++    Serial.flush();
 +  }
 +#elif defined(WIFI_SSID)
    board.setInhibitSleep(true);   // prevent sleep when WiFi is active
    WiFi.setAutoReconnect(true);
  
 diff --git a/examples/companion_radio/ui-new/UITask.cpp b/examples/companion_radio/ui-new/UITask.cpp
-index 7c842019..0156ea93 100644
+index 7c842019..803caf4e 100644
 --- a/examples/companion_radio/ui-new/UITask.cpp
 +++ b/examples/companion_radio/ui-new/UITask.cpp
 @@ -2,8 +2,8 @@
@@ -292,7 +311,7 @@ index 7c842019..0156ea93 100644
  #endif
  
  #ifndef AUTO_OFF_MILLIS
-@@ -217,7 +217,16 @@ public:
+@@ -217,7 +217,28 @@ public:
        sprintf(tmp, "MSG: %d", _task->getMsgCount());
        display.drawTextCentered(display.width() / 2, 20, tmp);
  
@@ -302,8 +321,20 @@ index 7c842019..0156ea93 100644
 +        // the softAP one. This is the number the field logger is pointed at.
 +        IPAddress ip = WiFi.softAPIP();
 +        if (ip[0] != 0) {
-+          snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 +          display.setTextSize(1);
++          if (!_task->hasConnection()) {
++            // Nobody has joined yet, which is exactly when the credentials are
++            // worth screen space. Once a client is on, the connected indicator
++            // takes this room back.
++            display.setColor(DisplayDriver::YELLOW);
++            display.drawTextCentered(display.width() / 2, 34, WiFi.softAPSSID().c_str());
++          #ifdef WIFI_AP_PASSWORD
++            snprintf(tmp, sizeof(tmp), "pass %s", WIFI_AP_PASSWORD);
++            display.drawTextCentered(display.width() / 2, 44, tmp);
++          #endif
++          }
++          display.setColor(DisplayDriver::GREEN);
++          snprintf(tmp, sizeof(tmp), "%d.%d.%d.%d:%d", ip[0], ip[1], ip[2], ip[3], TCP_PORT);
 +          display.drawTextCentered(display.width() / 2, 54, tmp);
 +        }
 +      #elif defined(WIFI_SSID)
