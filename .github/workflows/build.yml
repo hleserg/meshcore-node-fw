@@ -1,0 +1,131 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: t114
+            label: Heltec T114 (nRF52840)
+            artifact: t114-companion.uf2
+          - target: v4
+            label: Heltec V4 (ESP32-S3)
+            artifact: v4-factory.bin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The PlatformIO toolchains are several hundred MB; key the cache on the
+      # things that can change which toolchain/packages are pulled in.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ matrix.target }}-${{ hashFiles('pio/meshcore-node-fw.ini', 'external/MeshCore/platformio.ini', '.gitmodules') }}
+          restore-keys: pio-${{ matrix.target }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Resolve firmware version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        env:
+          FIRMWARE_VERSION: ${{ steps.ver.outputs.version }}
+        run: python scripts/build.py ${{ matrix.target }}
+
+      - name: Check artifact exists
+        run: test -s "dist/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - run: ls -l artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/t114-companion.uf2
+            artifacts/v4-factory.bin
+            artifacts/manifest.json
+
+  pages:
+    name: Deploy flasher page
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # The page is served straight out of docs/ with the freshly built binaries
+      # dropped in beside index.html, so it always offers the current firmware.
+      - name: Assemble site
+        run: |
+          cp artifacts/t114-companion.uf2 docs/
+          cp artifacts/v4-factory.bin docs/
+          cp artifacts/manifest.json docs/
+          ls -l docs
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v4
