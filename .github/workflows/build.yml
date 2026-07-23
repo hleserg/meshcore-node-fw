@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -102,6 +104,9 @@ jobs:
   pages:
     name: Deploy flasher page
     needs: build
+    # A pull request must prove both firmwares still build, but must never
+    # publish to the live site - only merged code and tags deploy.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # GitHub Pages accepts one deployment at a time. Pushing a commit and a tag
     # together starts two runs whose top-level concurrency groups differ (they
