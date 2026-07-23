@@ -158,7 +158,6 @@ jobs:
           cp artifacts/t114-companion.uf2 docs/
           cp artifacts/v4-factory.bin docs/
           cp artifacts/manifest.json docs/
-          cp MESHCORE_TESTING.md MESHCORE_MARK.md docs/ 2>/dev/null || true
           python scripts/build_site.py
           ls -l docs
 

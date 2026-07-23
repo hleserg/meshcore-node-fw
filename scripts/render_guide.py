@@ -38,6 +38,17 @@ CALLOUTS = {
     "💡": ("tip", "Подсказка"),
     "✅": ("success", "Чек-лист"),
 }
+# Any other emoji-led blockquote still becomes a card, just a neutral one, so a
+# marker we have not seen before does not silently fall back to a grey quote.
+DEFAULT_CALLOUT = ("note", "Заметка")
+
+EMOJI_LEAD = re.compile(
+    "^["
+    "\U0001F300-\U0001FAFF"   # pictographs, symbols, emoticons
+    "☀-➿"           # misc symbols & dingbats
+    "⬀-⯿"
+    "️⃣]+"
+)
 
 MD_EXTENSIONS = [
     "tables",
@@ -81,7 +92,7 @@ def add_copy_buttons(body: str) -> tuple[str, int]:
 
 
 def _callout_card(marker: str, inner: str) -> str:
-    kind, label = CALLOUTS[marker]
+    kind, label = CALLOUTS.get(marker, DEFAULT_CALLOUT)
     inner = inner.replace(marker, "", 1)  # the card header already shows the icon
     return (
         f'<div class="callout callout-{kind}">'
@@ -110,10 +121,13 @@ def convert_callouts(body: str) -> tuple[str, int]:
         starts: list[tuple[int, str]] = []
         for pm in re.finditer(r"<p>([^<]*)", inner):
             lead = html.unescape(pm.group(1)).lstrip()
-            for marker in CALLOUTS:
-                if lead.startswith(marker):
-                    starts.append((pm.start(), marker))
-                    break
+            known = next((m for m in CALLOUTS if lead.startswith(m)), None)
+            if known:
+                starts.append((pm.start(), known))
+                continue
+            other = EMOJI_LEAD.match(lead)
+            if other:
+                starts.append((pm.start(), other.group(0)))
         if not starts:
             return m.group(0)
 
@@ -131,23 +145,44 @@ def convert_callouts(body: str) -> tuple[str, int]:
 
 
 def anchor_headings(body: str) -> tuple[str, list[dict]]:
-    """Give h2/h3 stable ids and collect them for the TOC."""
+    """Give h1/h2/h3 stable ids and collect them for the TOC.
+
+    h1 is included on purpose: these guides use it for the major parts
+    ("ЧАСТЬ 1", "ГРАБЛИ"), so a table of contents built from h2/h3 alone would
+    drop the entire top level of the document.
+    """
     toc: list[dict] = []
     seen: dict[str, int] = {}
 
     def repl(m: re.Match) -> str:
         level, attrs, text = int(m.group(1)), m.group(2), m.group(3)
-        if re.search(r'\bid=', attrs):
+        if re.search(r"\bid=", attrs):
             return m.group(0)
         slug = slugify(text)
         seen[slug] = seen.get(slug, 0) + 1
         if seen[slug] > 1:
             slug = f"{slug}-{seen[slug]}"
         toc.append({"level": level, "id": slug, "text": re.sub(r"<[^>]+>", "", text)})
-        return f'<h{level} id="{slug}"{attrs}>{text}'f'<a class="anchor" href="#{slug}" aria-label="Ссылка на раздел">#</a></h{level}>'
+        return (
+            f'<h{level} id="{slug}"{attrs}>{text}'
+            f'<a class="anchor" href="#{slug}" aria-label="Ссылка на раздел">#</a></h{level}>'
+        )
 
-    body = re.sub(r"<h([23])([^>]*)>(.*?)</h\1>", repl, body, flags=re.DOTALL)
+    body = re.sub(r"<h([123])([^>]*)>(.*?)</h\1>", repl, body, flags=re.DOTALL)
     return body, toc
+
+
+def split_title(md: str) -> tuple[str | None, str]:
+    """Pull a leading '# Title' off the document.
+
+    The guides open with their own title, which would otherwise be rendered a
+    second time under the page heading. Using it as the page title keeps the
+    document the single source of truth for its own name.
+    """
+    m = re.match(r"\s*#\s+(.+?)\s*\n", md)
+    if not m:
+        return None, md
+    return m.group(1).strip(), md[m.end():]
 
 
 def wrap_tables(body: str) -> tuple[str, int]:
@@ -170,6 +205,10 @@ def render_toc(toc: list[dict]) -> str:
 
 def render(md_path: Path, title: str, subtitle: str) -> tuple[str, dict]:
     source = md_path.read_text(encoding="utf-8")
+
+    doc_title, source = split_title(source)
+    if doc_title:
+        title = doc_title
 
     md = markdown.Markdown(
         extensions=MD_EXTENSIONS, extension_configs=MD_EXTENSION_CONFIGS

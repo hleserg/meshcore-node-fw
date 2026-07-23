@@ -24,6 +24,7 @@ import json
 import re
 import shutil
 import sys
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,6 +55,10 @@ GUIDES = [
 
 LOGGER_SOURCE = "meshlog.py"
 LOGGER_RUN_CMD = "python meshlog.py --tcp 192.168.4.1:5000"
+# The logger lives in its own repo and keeps changing, so it is fetched at build
+# time rather than vendored - a copy in this repo would silently go stale.
+LOGGER_URL = "https://raw.githubusercontent.com/hleserg/flipperMeshCoreConfig/main/meshlog.py"
+LOGGER_REPO = "https://github.com/hleserg/flipperMeshCoreConfig"
 
 # Cached for offline use. The flasher needs Web Serial and a CDN, so it is
 # deliberately absent - caching it would promise something it cannot deliver.
@@ -80,44 +85,55 @@ def build_guides() -> list[dict]:
         if src.is_file():
             page, stats = render_guide.render(src, g["title"], g["subtitle"])
             out.write_text(page, encoding="utf-8")
+            # publish the Markdown next to the rendered page so the source is
+            # one click away (and so a local build matches what CI deploys)
+            shutil.copyfile(src, DOCS / g["source"])
             print(f"  + {g['output']:<20} from {g['source']}  {stats}")
             results.append({**g, "present": True, "stats": stats})
         else:
-            out.write_text(placeholder_page(g), encoding="utf-8")
-            print(f"  ! {g['output']:<20} PLACEHOLDER - {g['source']} not in the repo yet")
+            out.unlink(missing_ok=True)
+            print(f"  ! {g['output']:<20} skipped - {g['source']} not in the repo yet")
             results.append({**g, "present": False, "stats": None})
     return results
 
 
-def placeholder_page(g: dict) -> str:
-    body = (
-        "<h2>Инструкция ещё не загружена</h2>"
-        f"<p>Эта страница собирается из <code>{html.escape(g['source'])}</code> в корне "
-        "репозитория. Файла там пока нет, поэтому рендерить нечего.</p>"
-        "<p>Как только он будет закоммичен, страница пересоберётся автоматически "
-        "при следующем пуше — здесь появится полный текст инструкции.</p>"
-        '<p><a href="./">← вернуться в хаб</a></p>'
-    )
-    page = render_guide.TEMPLATE.read_text(encoding="utf-8")
-    return (
-        page.replace("{{TITLE}}", html.escape(g["title"]))
-        .replace("{{SUBTITLE}}", "источник ещё не закоммичен")
-        .replace("{{TOC}}", "")
-        .replace("{{BODY}}", body)
-        .replace("{{SOURCE_NAME}}", html.escape(g["source"]))
-    )
 
+def fetch_logger(offline: bool = False) -> tuple[bool, str]:
+    """Pull meshlog.py from its own repo, byte for byte.
 
-def copy_logger() -> bool:
-    src = ROOT / LOGGER_SOURCE
-    if src.is_file():
-        # Copied byte for byte: this is a field script debugged against real
-        # failures, not something to tidy up.
-        shutil.copyfile(src, DOCS / LOGGER_SOURCE)
-        print(f"  + {LOGGER_SOURCE:<20} copied verbatim ({src.stat().st_size} bytes)")
-        return True
-    print(f"  ! {LOGGER_SOURCE:<20} not in the repo yet - card will show as not ready")
-    return False
+    It is a field script debugged against real failures - it gets served exactly
+    as published, never edited or tidied here. A local copy in the repo root
+    wins if present, which is what --offline builds use.
+    """
+    local = ROOT / LOGGER_SOURCE
+    if local.is_file():
+        shutil.copyfile(local, DOCS / LOGGER_SOURCE)
+        data = local.read_bytes()
+        print(f"  + {LOGGER_SOURCE:<20} local copy ({len(data)} bytes)")
+        return True, hashlib.sha256(data).hexdigest()[:7]
+
+    if offline:
+        print(f"  ! {LOGGER_SOURCE:<20} skipped (--offline, no local copy)")
+        return False, ""
+
+    last = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(LOGGER_URL, timeout=20) as r:
+                data = r.read()
+            if not data:
+                raise ValueError("empty response")
+            (DOCS / LOGGER_SOURCE).write_bytes(data)
+            digest = hashlib.sha256(data).hexdigest()[:7]
+            print(f"  + {LOGGER_SOURCE:<20} fetched from flipperMeshCoreConfig "
+                  f"({len(data)} bytes, sha {digest})")
+            return True, digest
+        except Exception as exc:  # noqa: BLE001 - reported and retried below
+            last = exc
+            print(f"  . fetch attempt {attempt + 1}/3 failed: {exc}")
+
+    # Failing loudly beats publishing a hub whose logger card is a dead link.
+    sys.exit(f"could not fetch {LOGGER_URL}: {last}")
 
 
 def card_html(href: str, icon: str, title: str, blurb: str, ready: bool, note: str = "") -> str:
@@ -141,7 +157,7 @@ def card_html(href: str, icon: str, title: str, blurb: str, ready: bool, note: s
     )
 
 
-def build_hub(guides: list[dict], logger_ok: bool) -> None:
+def build_hub(guides: list[dict], logger_ok: bool, logger_ver: str = "") -> None:
     cards = [
         card_html("flash.html", "⚡", "Прошить ноду",
                   "Heltec V4 — кликом в браузере. T114 — файл .uf2.", True,
@@ -153,6 +169,7 @@ def build_hub(guides: list[dict], logger_ok: bool) -> None:
             '<div class="card-icon">📡</div>'
             "<h2>Скачать логгер</h2>"
             "<p>meshlog.py — пишет лог с ноды.</p>"
+            f'<p class="card-note">свежий из flipperMeshCoreConfig · {logger_ver}</p>'
             '<span class="card-go">скачать →</span>'
             "</a>"
         )
@@ -161,8 +178,9 @@ def build_hub(guides: list[dict], logger_ok: bool) -> None:
                                "meshlog.py — пишет лог с ноды.", False))
 
     for g in guides:
-        cards.append(card_html(g["output"], "📖", g["card"], g["blurb"], True,
-                               "" if g["present"] else "черновик"))
+        # A guide whose source is not committed gets a disabled card rather than
+        # a link to an empty page - no dead ends on the hub.
+        cards.append(card_html(g["output"], "📖", g["card"], g["blurb"], g["present"]))
 
     run_cmd = html.escape(LOGGER_RUN_CMD)
     logger_block = (
@@ -220,8 +238,11 @@ def build_pwa() -> None:
     # Cache name is a content hash of the cached assets, so it changes exactly
     # when they do. Python's hash() is salted per process and would mint a new
     # cache name on every build, throwing away the users' cache each deploy.
+    # cache.addAll() is atomic: a single 404 rejects the install and offline
+    # support silently disappears. Only list what actually got built.
+    assets = ["./"] + [n for n in SW_CACHE if n != "./" and (DOCS / n).is_file()]
     digest = hashlib.sha256()
-    for name in SW_CACHE:
+    for name in assets:
         f = DOCS / name
         if f.is_file():
             digest.update(name.encode())
@@ -232,7 +253,7 @@ def build_pwa() -> None:
 // cached - it needs Web Serial and a CDN, so pretending it works offline would
 // be a lie in the field.
 const CACHE = '{CACHE_PREFIX}-{version}';
-const ASSETS = {json.dumps(SW_CACHE, ensure_ascii=False)};
+const ASSETS = {json.dumps(assets, ensure_ascii=False)};
 
 self.addEventListener('install', (e) => {{
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -251,6 +272,28 @@ self.addEventListener('fetch', (e) => {{
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   // Never serve the flasher or firmware from cache.
   if (/flash\\.html|\\.bin$|\\.uf2$|manifest\\.json$/.test(url.pathname)) return;
+  const isDoc = e.request.mode === 'navigate' || /\\.html$|\\/$/.test(url.pathname);
+
+  if (isDoc) {{
+    // Network first for the guides. Cache first kept showing an old revision to
+    // someone who WAS online, and a stale field instruction is exactly the
+    // failure this whole thing exists to prevent. Offline falls back to cache.
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {{
+          if (res.ok) {{
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }}
+          return res;
+        }})
+        .catch(() => caches.match(e.request).then((hit) => hit || caches.match('index.html')))
+    );
+    return;
+  }}
+
+  // Static assets are re-cached under a new cache name whenever their content
+  // changes, so serving them from cache first is safe.
   e.respondWith(
     caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {{
       if (res.ok) {{
@@ -258,7 +301,7 @@ self.addEventListener('fetch', (e) => {{
         caches.open(CACHE).then((c) => c.put(e.request, copy));
       }}
       return res;
-    }}).catch(() => caches.match('index.html')))
+    }}))
   );
 }});
 """
@@ -271,9 +314,13 @@ self.addEventListener('fetch', (e) => {{
 # --------------------------------------------------------------------------- #
 
 def count_source(md: str) -> dict:
+    # Fenced blocks come in pairs; a language tag only ever sits on the opener.
     fences = len(re.findall(r"^```", md, flags=re.M)) // 2
+    # The leading '# Title' becomes the page heading rather than a section, so
+    # it is not expected to show up as an anchored heading in the output.
+    _, body = render_guide.split_title(md)
     return {
-        "headings": len(re.findall(r"^#{2,3} ", md, flags=re.M)),
+        "headings": len(re.findall(r"^#{1,3} ", body, flags=re.M)),
         "tables": len(re.findall(r"^\|.*\|\s*$\n^\|[\s:|-]+\|\s*$", md, flags=re.M)),
         "code_blocks": fences,
     }
@@ -286,16 +333,18 @@ def verify() -> int:
     # 1. guides: nothing lost in conversion
     for g in GUIDES:
         src, out = ROOT / g["source"], DOCS / g["output"]
+        if not src.is_file():
+            print(f"  ~ {g['output']}: skipped, {g['source']} not committed yet")
+            if out.is_file():
+                problems.append(f"{g['output']} exists but its source does not")
+            continue
         if not out.is_file():
             problems.append(f"{g['output']} was not produced")
             continue
         page = out.read_text(encoding="utf-8")
-        if not src.is_file():
-            print(f"  ~ {g['output']}: placeholder ({g['source']} not committed yet) - skipping content check")
-            continue
         want = count_source(src.read_text(encoding="utf-8"))
         got = {
-            "headings": len(re.findall(r'<h[23] id=', page)),
+            "headings": len(re.findall(r"<h[123] id=", page)),
             "tables": len(re.findall(r"<table\b", page)),
             "code_blocks": len(re.findall(r'<div class="code-wrap">', page)),
         }
@@ -353,9 +402,13 @@ def verify() -> int:
               + ("  OK" if not missing else f"  FAIL {missing}"))
         if missing:
             problems.append(f"index.html: broken card links {missing}")
-        for must in ("flash.html", "guide-sergey.html", "guide-mark.html"):
+        must_link = ["flash.html"] + [
+            g["output"] for g in GUIDES if (ROOT / g["source"]).is_file()
+        ]
+        for must in must_link:
             if must not in page:
                 problems.append(f"index.html: does not link {must}")
+        print(f"  index.html: links {must_link}  OK")
     else:
         problems.append("index.html missing")
 
@@ -380,14 +433,16 @@ def verify() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--verify", action="store_true", help="only verify an existing docs/")
+    ap.add_argument("--offline", action="store_true",
+                    help="do not fetch meshlog.py; use a local copy if there is one")
     args = ap.parse_args()
 
     if not args.verify:
         DOCS.mkdir(exist_ok=True)
         print("=== BUILD SITE ===")
         guides = build_guides()
-        logger_ok = copy_logger()
-        build_hub(guides, logger_ok)
+        logger_ok, logger_ver = fetch_logger(offline=args.offline)
+        build_hub(guides, logger_ok, logger_ver)
         build_pwa()
 
     return verify()
