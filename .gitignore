@@ -7,6 +7,9 @@ external/MeshCore/platformio.local.ini
 
 # build artifacts
 dist/
+# CI drops the freshly built binaries and manifest next to docs/index.html at
+# deploy time; they are never committed.
+docs/manifest.json
 *.uf2
 *.hex
 *.elf
