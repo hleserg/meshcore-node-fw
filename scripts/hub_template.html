@@ -52,15 +52,16 @@ a.card:hover,a.card:focus-visible{border-color:var(--accent); background:#182029
 .runbox{background:var(--bg2); border:1px solid var(--line); border-radius:14px; padding:1.1rem 1.2rem; margin:0 0 2rem}
 .runbox-label{font-family:var(--mono); font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
   color:var(--muted); margin:0 0 .6rem}
-.code-wrap{position:relative}
+.code-wrap{
+  background:#0d1117; border:1px solid var(--line); border-radius:10px; overflow:hidden;
+}
 .code-wrap pre{
-  margin:0; background:#0d1117; border:1px solid var(--line); border-radius:10px;
-  padding:1rem 5.5rem 1rem .95rem; overflow-x:auto;
+  margin:0; background:none; border:0; padding:.3rem .95rem 1rem; overflow-x:auto;
   font-family:var(--mono); font-size:.88rem; line-height:1.5;
 }
 .code-wrap pre code{background:none; border:0; padding:0}
 .copy-btn{
-  position:absolute; top:.5rem; right:.5rem; z-index:2;
+  display:block; margin:.5rem .5rem 0 auto;
   background:var(--card); color:var(--muted); border:1px solid var(--line);
   border-radius:7px; padding:.45rem .7rem; font-family:var(--mono); font-size:.75rem;
   cursor:pointer; transition:all .15s;
