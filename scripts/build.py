@@ -25,16 +25,22 @@ DIST = ROOT / "dist"
 
 TARGETS = {
     "t114": {
-        "env": "t114_companion_serial",
+        "env": "t114_companion",
         "platform": "nrf52",
         "artifact": "t114-companion.uf2",
-        "label": "Heltec T114 (nRF52840)",
+        "label": "T114 companion (auto-detect: UART / BLE)",
     },
     "v4": {
-        "env": "v4_companion_serial",
+        "env": "v4_companion",
         "platform": "esp32",
-        "artifact": "v4-factory.bin",
-        "label": "Heltec WiFi LoRa 32 V4 (ESP32-S3)",
+        "artifact": "v4-companion-factory.bin",
+        "label": "V4 companion (auto-detect: UART / WiFi AP)",
+    },
+    "t114rep": {
+        "env": "t114_repeater",
+        "platform": "nrf52",
+        "artifact": "t114-repeater.uf2",
+        "label": "T114 repeater (stock)",
     },
 }
 
@@ -76,7 +82,7 @@ def build_env(env_vars: dict) -> dict:
     return env
 
 
-def build_t114(spec):
+def build_nrf52(spec):
     out = DIST / spec["artifact"]
     pio("run", "-e", spec["env"], env=build_env({}))
     hex_file = MESHCORE / ".pio" / "build" / spec["env"] / "firmware.hex"
@@ -99,7 +105,7 @@ def build_t114(spec):
     return out
 
 
-def build_v4(spec):
+def build_esp32(spec):
     out = DIST / spec["artifact"]
     env = build_env({"MERGED_BIN_PATH": str(out)})
     pio("run", "-e", spec["env"], env=env)
@@ -113,13 +119,13 @@ def build_v4(spec):
 
 def write_manifest(version: str):
     manifest = {
-        "name": "MeshCore Companion (UART) - Heltec V4",
+        "name": "MeshCore Companion - Heltec V4",
         "version": version,
         "new_install_prompt_erase": True,
         "builds": [
             {
                 "chipFamily": "ESP32-S3",
-                "parts": [{"path": "v4-factory.bin", "offset": 0}],
+                "parts": [{"path": "v4-companion-factory.bin", "offset": 0}],
             }
         ],
     }
@@ -141,7 +147,7 @@ def main() -> int:
     for name in names:
         spec = TARGETS[name]
         print(f"\n=== {spec['label']} -> {spec['artifact']} ===", flush=True)
-        out = build_t114(spec) if name == "t114" else build_v4(spec)
+        out = build_nrf52(spec) if spec["platform"] == "nrf52" else build_esp32(spec)
         print(f"  > {out.relative_to(ROOT)} ({out.stat().st_size} bytes)")
         if name == "v4":
             write_manifest(version_string())

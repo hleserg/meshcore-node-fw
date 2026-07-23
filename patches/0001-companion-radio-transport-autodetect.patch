@@ -1,0 +1,312 @@
+diff --git a/examples/companion_radio/AbstractUITask.h b/examples/companion_radio/AbstractUITask.h
+index 0eee45ae..900c90af 100644
+--- a/examples/companion_radio/AbstractUITask.h
++++ b/examples/companion_radio/AbstractUITask.h
+@@ -33,6 +33,9 @@ protected:
+   }
+ 
+ public:
++  // With TRANSPORT_DETECT_PIN the transport is picked at boot, after this object
++  // has already been constructed, so the interface has to be swapped in later.
++  void setSerialInterface(BaseSerialInterface* serial) { _serial = serial; }
+   void setHasConnection(bool connected) { _connected = connected; }
+   bool hasConnection() const { return _connected; }
+   uint16_t getBattMilliVolts() const { return _board->getBattMilliVolts(); }
+diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
+index ef9b6bfc..dc591c32 100644
+--- a/examples/companion_radio/main.cpp
++++ b/examples/companion_radio/main.cpp
+@@ -34,8 +34,52 @@ static uint32_t _atoi(const char* sp) {
+   DataStore store(SPIFFS, rtc_clock);
+ #endif
+ 
++/* ---------------------------------------------------------------------------
++   Runtime transport selection.
++
++   Stock picks the companion transport at compile time, in this priority order:
++   WiFi -> BLE -> hardware serial -> USB. With TRANSPORT_DETECT_PIN defined we
++   instead compile in BOTH the wired and the wireless transport and decide once
++   at boot, from the level of a GPIO with an internal pull-down:
++
++     HIGH -> a Flipper is wired to the header: companion protocol on the
++             hardware UART. No WiFi, no BLE.
++     LOW  -> nothing wired: bring up the wireless transport
++             (ESP32 -> WiFi AP + TCP server, nRF52 -> BLE).
++
++   The decision is made once. Changing mode means rebooting the node; there is
++   deliberately no hot switching.
++
++   `serial_interface` becomes a macro over the chosen pointer so the rest of this
++   file - which refers to it in several places - stays exactly as upstream wrote
++   it, and so the diff carried in patches/ stays small.
++   --------------------------------------------------------------------------- */
++#if defined(TRANSPORT_DETECT_PIN)
++  static bool transport_is_wired = false;
++  #define serial_interface (*serial_interface_ptr)
++#endif
++
+ #ifdef ESP32
+-  #ifdef WIFI_SSID
++  #if defined(TRANSPORT_DETECT_PIN)
++    #include <helpers/esp32/SerialWifiInterface.h>
++    #include <helpers/ArduinoSerialInterface.h>
++    SerialWifiInterface serial_wireless;
++    ArduinoSerialInterface serial_wired;
++    BaseSerialInterface* serial_interface_ptr = &serial_wired;
++    // UART1 is claimed by the GPS (EnvironmentSensorManager uses Serial1).
++    #ifndef COMPANION_SERIAL_NUM
++      #define COMPANION_SERIAL_NUM 2
++    #endif
++    HardwareSerial companion_serial(COMPANION_SERIAL_NUM);
++    #ifndef TCP_PORT
++      #define TCP_PORT 5000
++    #endif
++    // The node is its own access point: at a festival there is no network to
++    // join, so the phone connects to the node and reaches it on 192.168.4.1.
++    #ifndef WIFI_AP_PREFIX
++      #define WIFI_AP_PREFIX "MeshCore-"
++    #endif
++  #elif defined(WIFI_SSID)
+     #include <helpers/esp32/SerialWifiInterface.h>
+     SerialWifiInterface serial_interface;
+     #ifndef TCP_PORT
+@@ -47,7 +91,12 @@ static uint32_t _atoi(const char* sp) {
+   #elif defined(SERIAL_RX)
+     #include <helpers/ArduinoSerialInterface.h>
+     ArduinoSerialInterface serial_interface;
+-    HardwareSerial companion_serial(1);
++    // UART1 is claimed by the GPS (EnvironmentSensorManager uses Serial1), so let
++    // the board pick a free UART peripheral with -D COMPANION_SERIAL_NUM=n.
++    #ifndef COMPANION_SERIAL_NUM
++      #define COMPANION_SERIAL_NUM 1
++    #endif
++    HardwareSerial companion_serial(COMPANION_SERIAL_NUM);
+   #else
+     #include <helpers/ArduinoSerialInterface.h>
+     ArduinoSerialInterface serial_interface;
+@@ -71,9 +120,29 @@ static uint32_t _atoi(const char* sp) {
+     ArduinoSerialInterface serial_interface;
+   #endif
+ #elif defined(NRF52_PLATFORM)
+-  #ifdef BLE_PIN_CODE
++  #if defined(TRANSPORT_DETECT_PIN)
++    #include <helpers/nrf52/SerialBLEInterface.h>
++    #include <helpers/ArduinoSerialInterface.h>
++    SerialBLEInterface serial_wireless;
++    ArduinoSerialInterface serial_wired;
++    BaseSerialInterface* serial_interface_ptr = &serial_wired;
++    // Serial1 is NRF_UARTE0 and is wired to the GPS on these boards, so the
++    // companion UART defaults to Serial2 (NRF_UARTE1).
++    #ifndef COMPANION_SERIAL
++      #define COMPANION_SERIAL Serial2
++    #endif
++  #elif defined(BLE_PIN_CODE)
+     #include <helpers/nrf52/SerialBLEInterface.h>
+     SerialBLEInterface serial_interface;
++  #elif defined(SERIAL_RX)
++    #include <helpers/ArduinoSerialInterface.h>
++    ArduinoSerialInterface serial_interface;
++    // Companion protocol on a hardware UART instead of USB-CDC.
++    // Serial1 is NRF_UARTE0 and on most variants is wired to the GPS, so default
++    // to Serial2 (NRF_UARTE1). Override with -D COMPANION_SERIAL=SerialX.
++    #ifndef COMPANION_SERIAL
++      #define COMPANION_SERIAL Serial2
++    #endif
+   #else
+     #include <helpers/ArduinoSerialInterface.h>
+     ArduinoSerialInterface serial_interface;
+@@ -85,6 +154,87 @@ static uint32_t _atoi(const char* sp) {
+   #error "need to define a serial interface"
+ #endif
+ 
++#if defined(TRANSPORT_DETECT_PIN)
++  // Report what was detected and which pins are in play, over USB-CDC. On nRF52
++  // the Arduino pin number is an index into g_ADigitalPinMap, so the silkscreen
++  // label, the Arduino number and the actual port pin can all disagree - print
++  // the resolved port pin rather than echoing the number we were handed.
++  #define _MC_STR2(x) #x
++  #define _MC_STR(x) _MC_STR2(x)
++
++  // Connector positions for the banner. Boards pass the actual header labels so
++  // the printout can be held against the soldering; they come from the same
++  // build flags as the pin numbers, so the two cannot drift apart.
++  #ifndef DETECT_PIN_LABEL
++    #define DETECT_PIN_LABEL "GPIO" _MC_STR(TRANSPORT_DETECT_PIN)
++  #endif
++  #ifndef SERIAL_RX_LABEL
++    #define SERIAL_RX_LABEL "GPIO" _MC_STR(SERIAL_RX)
++  #endif
++  #ifndef SERIAL_TX_LABEL
++    #define SERIAL_TX_LABEL "GPIO" _MC_STR(SERIAL_TX)
++  #endif
++  #if defined(ESP32)
++    #define RADIO_MODE_LABEL "wifi-ap"
++  #else
++    #define RADIO_MODE_LABEL "ble"
++  #endif
++
++  #if defined(NRF52_PLATFORM)
++    static void printPin(const char* label, uint32_t arduino_pin) {
++      uint32_t p = g_ADigitalPinMap[arduino_pin];
++      Serial.printf("%-10s: arduino %-3u -> P%u.%02u\n", label, arduino_pin, p / 32, p % 32);
++    }
++  #else
++    static void printPin(const char* label, uint32_t gpio) {
++      Serial.printf("%-10s: GPIO%u\n", label, gpio);
++    }
++  #endif
++
++  static void printBootBanner() {
++    uint32_t t0 = millis();
++    while (!Serial && millis() - t0 < 1500) { delay(10); }  // let the host attach
++
++    Serial.println();
++    Serial.println("=== MeshCore companion :: transport auto-detect ===");
++    Serial.printf("firmware  : %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
++
++    // One line to hold against the soldered wires, with header positions.
++    Serial.printf("DETECT=%s = %s -> %s | UART RX=%s, TX=%s\n",
++                  DETECT_PIN_LABEL,
++                  transport_is_wired ? "HIGH" : "LOW",
++                  transport_is_wired ? "serial" : RADIO_MODE_LABEL,
++                  SERIAL_RX_LABEL, SERIAL_TX_LABEL);
++
++    printPin("detect", TRANSPORT_DETECT_PIN);
++    Serial.printf("detect    : %s\n", transport_is_wired ? "HIGH (something wired)" : "LOW (nothing wired)");
++    if (transport_is_wired) {
++      Serial.println("transport : HARDWARE UART - companion protocol on the wire");
++    #if defined(NRF52_PLATFORM)
++      Serial.printf("uart port : %s (NRF_UARTE)\n", _MC_STR(COMPANION_SERIAL));
++    #else
++      Serial.printf("uart port : UART%s\n", _MC_STR(COMPANION_SERIAL_NUM));
++    #endif
++      printPin("uart RX", SERIAL_RX);
++      printPin("uart TX", SERIAL_TX);
++      Serial.println("baud      : 115200 8N1");
++      Serial.println("wiring    : board RX <- adapter TX, board TX -> adapter RX, GND <-> GND");
++      Serial.println("note      : companion is on the UART above, NOT on this USB port");
++    } else {
++    #if defined(ESP32)
++      Serial.println("transport : WiFi access point + TCP server");
++      Serial.printf("tcp port  : %d\n", TCP_PORT);
++      Serial.println("ap addr   : 192.168.4.1 (once the AP is up)");
++    #else
++      Serial.println("transport : BLE");
++    #endif
++      Serial.println("note      : pull the detect pin HIGH and reboot to use the wire");
++    }
++    Serial.println("==================================================");
++    Serial.flush();
++  }
++#endif
++
+ /* GLOBAL OBJECTS */
+ #ifdef DISPLAY_CLASS
+   #include "UITask.h"
+@@ -114,6 +264,23 @@ void halt() {
+ void setup() {
+   Serial.begin(115200);
+ 
++#if defined(TRANSPORT_DETECT_PIN)
++  // Sample the detect pin before anything else touches a transport. The pull-down
++  // means "nothing wired" is the resting state, so an unconnected pin reads LOW
++  // and the node comes up wireless - the same way a stock node would.
++  pinMode(TRANSPORT_DETECT_PIN, INPUT_PULLDOWN);
++  delayMicroseconds(200);            // let the pull-down settle before sampling
++  transport_is_wired = (digitalRead(TRANSPORT_DETECT_PIN) == HIGH);
++  serial_interface_ptr = transport_is_wired
++      ? (BaseSerialInterface*)&serial_wired
++      : (BaseSerialInterface*)&serial_wireless;
++  printBootBanner();
++  #ifdef DISPLAY_CLASS
++    // ui_task was constructed before the choice was made; point it at the winner.
++    ui_task.setSerialInterface(serial_interface_ptr);
++  #endif
++#endif
++
+   board.begin();
+ 
+ #ifdef DISPLAY_CLASS
+@@ -156,8 +323,20 @@ void setup() {
+     #endif
+   );
+ 
+-#ifdef BLE_PIN_CODE
++#if defined(TRANSPORT_DETECT_PIN)
++  if (transport_is_wired) {
++    COMPANION_SERIAL.setPins(SERIAL_RX, SERIAL_TX);
++    COMPANION_SERIAL.begin(115200);
++    serial_wired.begin(COMPANION_SERIAL);
++  } else {
++    serial_wireless.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
++  }
++#elif defined(BLE_PIN_CODE)
+   serial_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
++#elif defined(NRF52_PLATFORM) && defined(SERIAL_RX)
++  COMPANION_SERIAL.setPins(SERIAL_RX, SERIAL_TX);
++  COMPANION_SERIAL.begin(115200);
++  serial_interface.begin(COMPANION_SERIAL);
+ #else
+   serial_interface.begin(Serial);
+ #endif
+@@ -199,7 +378,26 @@ void setup() {
+     #endif
+   );
+ 
+-#ifdef WIFI_SSID
++#if defined(TRANSPORT_DETECT_PIN)
++  if (transport_is_wired) {
++    companion_serial.setPins(SERIAL_RX, SERIAL_TX);
++    companion_serial.begin(115200);
++    serial_wired.begin(companion_serial);
++  } else {
++    board.setInhibitSleep(true);   // prevent sleep while the AP is up
++    // Access point, not station: in the field there is no network to join, and
++    // the logger reaches the node at the softAP address (192.168.4.1).
++    char ap_ssid[40];
++    snprintf(ap_ssid, sizeof(ap_ssid), WIFI_AP_PREFIX "%s", the_mesh.getNodePrefs()->node_name);
++    WiFi.mode(WIFI_AP);
++  #ifdef WIFI_AP_PASSWORD
++    WiFi.softAP(ap_ssid, WIFI_AP_PASSWORD);
++  #else
++    WiFi.softAP(ap_ssid);
++  #endif
++    serial_wireless.begin(TCP_PORT);
++  }
++#elif defined(WIFI_SSID)
+   board.setInhibitSleep(true);   // prevent sleep when WiFi is active
+   WiFi.setAutoReconnect(true);
+ 
+diff --git a/examples/companion_radio/ui-new/UITask.cpp b/examples/companion_radio/ui-new/UITask.cpp
+index 7c842019..0156ea93 100644
+--- a/examples/companion_radio/ui-new/UITask.cpp
++++ b/examples/companion_radio/ui-new/UITask.cpp
+@@ -2,8 +2,8 @@
+ #include <helpers/TxtDataHelpers.h>
+ #include "../MyMesh.h"
+ #include "target.h"
+-#ifdef WIFI_SSID
+-  #include <WiFi.h>
++#if defined(WIFI_SSID) || (defined(TRANSPORT_DETECT_PIN) && defined(ESP32))
++  #include <WiFi.h>   // nRF52 has no WiFi at all; only pull it in on ESP32
+ #endif
+ 
+ #ifndef AUTO_OFF_MILLIS
+@@ -217,7 +217,16 @@ public:
+       sprintf(tmp, "MSG: %d", _task->getMsgCount());
+       display.drawTextCentered(display.width() / 2, 20, tmp);
+ 
+-      #ifdef WIFI_SSID
++      #if defined(TRANSPORT_DETECT_PIN) && defined(ESP32)
++        // In AP mode localIP() is 0.0.0.0 - the address the phone talks to is
++        // the softAP one. This is the number the field logger is pointed at.
++        IPAddress ip = WiFi.softAPIP();
++        if (ip[0] != 0) {
++          snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
++          display.setTextSize(1);
++          display.drawTextCentered(display.width() / 2, 54, tmp);
++        }
++      #elif defined(WIFI_SSID)
+         IPAddress ip = WiFi.localIP();
+         snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+         display.setTextSize(1);
