@@ -108,14 +108,16 @@ jobs:
   pages:
     name: Deploy field hub
     needs: build
-    # A pull request must prove both firmwares still build, but must never
-    # publish to the live site - only merged code and tags deploy.
-    if: github.event_name != 'pull_request'
+    # A pull request must prove the firmwares still build but must never publish
+    # to the live site. Tags are skipped too: a tag points at a commit that is
+    # already on main, so its run would deploy identical content while racing the
+    # main run for the github-pages environment - which is exactly how the v0.2.0
+    # tag ended up with a red cross on a job that never started a single step.
+    if: github.event_name != 'pull_request' && github.ref_type != 'tag'
     runs-on: ubuntu-latest
-    # GitHub Pages accepts one deployment at a time. Pushing a commit and a tag
-    # together starts two runs whose top-level concurrency groups differ (they
-    # are keyed on the ref), so without this they race and one deploy is
-    # rejected. Queue instead of cancelling, so the tagged build still lands.
+    # GitHub Pages accepts one deployment at a time; keep pushes to main queued
+    # behind each other rather than cancelling, so a fast follow-up push cannot
+    # abandon a deploy half way.
     concurrency:
       group: pages
       cancel-in-progress: false
