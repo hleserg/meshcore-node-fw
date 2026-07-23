@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>MeshCore — прошивка нод</title>
+<meta name="description" content="Прошивка нод MeshCore: Heltec V4 кликом в браузере, Heltec T114 файлом .uf2. Транспорт нода выбирает сама.">
+<style>
+:root{
+  --bg:#0b0d10; --bg2:#12161b; --card:#151a21; --line:#242b34;
+  --fg:#dfe5ec; --muted:#8b97a6; --accent:#4ade80; --accent2:#38bdf8;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--fg); min-height:100vh;
+  font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background-image:radial-gradient(circle at 50% 0,rgba(74,222,128,.06),transparent 55%);
+}
+.wrap{max-width:48rem; margin:0 auto; padding:2.5rem max(1rem,env(safe-area-inset-left)) 4rem}
+
+.eyebrow{font-family:var(--mono); font-size:.78rem; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 .6rem}
+h1{font-size:2rem; line-height:1.15; margin:0 0 .6rem; letter-spacing:-.02em}
+.lede{color:var(--muted); margin:0 0 2rem}
+
+.step{margin:0 0 2rem}
+.step-label{font-family:var(--mono); font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--muted); margin:0 0 .7rem}
+.choices{display:grid; gap:.7rem; grid-template-columns:1fr 1fr}
+@media (max-width:520px){ .choices{grid-template-columns:1fr} h1{font-size:1.65rem} }
+
+.choice{
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  padding:1rem 1.1rem; color:inherit; font:inherit; text-align:left; cursor:pointer;
+  transition:border-color .15s, background .15s;
+}
+.choice b{display:block; font-size:1.02rem}
+.choice small{display:block; color:var(--muted); font-size:.83rem; margin-top:.15rem}
+.choice:hover{border-color:var(--accent)}
+.choice[aria-pressed="true"]{border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); background:#182029}
+.choice[disabled]{opacity:.35; cursor:not-allowed}
+.choice[disabled]:hover{border-color:var(--line)}
+
+.result{background:var(--bg2); border:1px solid var(--line); border-radius:14px; padding:1.4rem 1.3rem; margin:0 0 1.5rem}
+.result h2{font-size:1.15rem; margin:0 0 .3rem}
+.result p{margin:.5rem 0; color:var(--muted); font-size:.95rem}
+.result ol{padding-left:1.3rem; margin:.8rem 0 0}
+.result li{margin:.45rem 0; color:var(--fg)}
+.hidden{display:none}
+
+.btn{
+  display:inline-block; margin-top:.9rem; padding:.85rem 1.4rem; border-radius:10px;
+  background:var(--accent); color:#08130a; font-weight:700; text-decoration:none;
+  border:0; font-size:1rem; cursor:pointer;
+}
+.btn:hover{filter:brightness(1.08)}
+.unsupported{color:var(--muted); font-size:.9rem; display:block; margin-top:.8rem}
+
+.code-wrap{background:#0d1117; border:1px solid var(--line); border-radius:10px; overflow:hidden; margin:.8rem 0 0}
+.code-wrap pre{margin:0; background:none; border:0; padding:.3rem .95rem 1rem; overflow-x:auto;
+  font-family:var(--mono); font-size:.86rem; line-height:1.5}
+.copy-btn{display:block; margin:.5rem .5rem 0 auto; background:var(--card); color:var(--muted);
+  border:1px solid var(--line); border-radius:7px; padding:.45rem .7rem;
+  font-family:var(--mono); font-size:.75rem; cursor:pointer; transition:all .15s}
+.copy-btn:hover{color:var(--accent); border-color:var(--accent)}
+.copy-btn.copied{color:#08130a; background:var(--accent); border-color:var(--accent)}
+
+.note{border:1px solid; border-left-width:4px; border-radius:12px; padding:.9rem 1rem; font-size:.93rem; margin:0 0 1.2rem}
+.note strong{display:block; margin-bottom:.25rem}
+.note-tip{background:rgba(56,189,248,.07); border-color:rgba(56,189,248,.5)}
+.note-tip strong{color:var(--accent2)}
+.note-warn{background:rgba(251,191,36,.07); border-color:rgba(251,191,36,.5)}
+.note-warn strong{color:#fbbf24}
+
+.guides{display:block; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--accent2);
+  border-radius:12px; padding:1rem 1.1rem; text-decoration:none; color:inherit; margin:0 0 1.5rem}
+.guides:hover{border-color:var(--accent2)}
+.guides b{display:block}
+.guides small{color:var(--muted); font-size:.85rem}
+
+code{font-family:var(--mono); font-size:.88em; background:var(--bg2); border:1px solid var(--line);
+  border-radius:5px; padding:.1em .38em}
+footer{border-top:1px solid var(--line); padding-top:1.2rem; color:var(--muted); font-size:.85rem; font-family:var(--mono)}
+footer a{color:var(--muted)}
+a{color:var(--accent2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">MeshCore · Node Firmware</p>
+  <h1>Прошивка нод</h1>
+  <p class="lede">
+    Выбери плату и тип прошивки. V4 шьётся кликом прямо здесь, T114 — файлом.
+    Ставить PlatformIO не нужно.
+  </p>
+
+  <div class="note note-tip">
+    <strong>Нода сама выберет режим</strong>
+    Companion-прошивка на старте читает detect-пин: провод от флиппера подключён —
+    работает по проводу; ничего не подключено — поднимает WiFi-точку (V4) или BLE (T114).
+    Смена режима = перезагрузка ноды.
+  </div>
+
+  <div class="step">
+    <p class="step-label">Шаг 1 · плата</p>
+    <div class="choices">
+      <button class="choice" data-board="t114" aria-pressed="false">
+        <b>Heltec Mesh Node T114</b><small>nRF52840 · файл .uf2</small>
+      </button>
+      <button class="choice" data-board="v4" aria-pressed="false">
+        <b>Heltec WiFi LoRa 32 V4</b><small>ESP32-S3 · клик в браузере</small>
+      </button>
+    </div>
+  </div>
+
+  <div class="step">
+    <p class="step-label">Шаг 2 · прошивка</p>
+    <div class="choices">
+      <button class="choice" data-fw="companion" aria-pressed="false">
+        <b>Companion</b><small>для роверов — флиппер, телефон, логгер</small>
+      </button>
+      <button class="choice" data-fw="repeater" aria-pressed="false">
+        <b>Repeater</b><small>ретранслятор · только T114</small>
+      </button>
+    </div>
+  </div>
+
+  <!-- V4 companion: browser flashing -->
+  <div class="result hidden" id="r-v4-companion">
+    <h2>Heltec V4 · companion</h2>
+    <p>Воткни плату в USB и нажми кнопку. Нужен Chrome или Edge на десктопе.</p>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate" class="btn">Прошить V4 через браузер</button>
+      <span slot="unsupported" class="unsupported">
+        Браузер не поддерживает Web Serial. Открой в Chrome или Edge на десктопе.
+      </span>
+      <span slot="not-allowed" class="unsupported">
+        Web Serial работает только по HTTPS.
+      </span>
+    </esp-web-install-button>
+    <p>Или скачать образ вручную:
+      <a href="v4-companion-factory.bin" download>v4-companion-factory.bin</a>
+      (bootloader + partitions + приложение одним куском, пишется с offset&nbsp;0).</p>
+  </div>
+
+  <!-- T114 companion -->
+  <div class="result hidden" id="r-t114-companion">
+    <h2>Heltec T114 · companion</h2>
+    <a class="btn" href="t114-companion.uf2" download>Скачать t114-companion.uf2</a>
+    <ol>
+      <li>Подключи T114 к компьютеру по USB.</li>
+      <li>Быстро нажми <code>RST</code> <b>два раза</b>.</li>
+      <li>Появится диск <code>T114BOOT</code>.</li>
+      <li>Перетащи на него скачанный файл.</li>
+      <li>Плата перезагрузится сама — диск исчезнет.</li>
+    </ol>
+  </div>
+
+  <!-- T114 repeater -->
+  <div class="result hidden" id="r-t114-repeater">
+    <h2>Heltec T114 · repeater</h2>
+    <p>Стоковый ретранслятор: без автодетекта и без UART-патча — им это не нужно.</p>
+    <a class="btn" href="t114-repeater.uf2" download>Скачать t114-repeater.uf2</a>
+    <ol>
+      <li>Подключи T114 к компьютеру по USB.</li>
+      <li>Быстро нажми <code>RST</code> <b>два раза</b>.</li>
+      <li>Появится диск <code>T114BOOT</code>.</li>
+      <li>Перетащи на него скачанный файл.</li>
+    </ol>
+  </div>
+
+  <!-- V4 repeater: not offered -->
+  <div class="result hidden" id="r-v4-repeater">
+    <h2>Для V4 ретранслятора нет</h2>
+    <p>Ретрансляторы в этой сети — только T114. Выбери T114 или вернись к companion.</p>
+  </div>
+
+  <div class="note note-warn" id="radio-note">
+    <strong>После прошивки выставь радио</strong>
+    Если настройки разойдутся хоть на йоту — ноды физически не услышат друг друга.
+    <div class="code-wrap">
+      <button class="copy-btn" type="button" aria-label="Скопировать команду">копировать</button>
+      <pre><code>meshcli -s COM5 set radio 869.525,250,11,5</code></pre>
+    </div>
+    <p style="margin:.7rem 0 0; color:var(--muted); font-size:.88rem">
+      freq 869.525 МГц · BW 250 кГц · SF 11 · CR 5. Порт свой.
+      Можно и в мобильном приложении — там просто поля.
+    </p>
+  </div>
+
+  <a class="guides" href="https://hleserg.github.io/flipperMeshCoreConfig">
+    <b>Инструкции и логгер →</b>
+    <small>hleserg.github.io/flipperMeshCoreConfig</small>
+  </a>
+
+  <footer>
+    <p>Собрано в CI из <a href="https://github.com/meshcore-dev/MeshCore">MeshCore</a>
+      · <a href="https://github.com/hleserg/meshcore-node-fw">исходники</a></p>
+    <p id="build-version"></p>
+  </footer>
+</div>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+<script>
+  let board = null, fw = null;
+
+  function render() {
+    document.querySelectorAll('.result').forEach(r => r.classList.add('hidden'));
+    document.querySelectorAll('[data-board]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.board === board)));
+    document.querySelectorAll('[data-fw]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.fw === fw)));
+    if (board && fw) {
+      const el = document.getElementById(`r-${board}-${fw}`);
+      if (el) el.classList.remove('hidden');
+    }
+    // the radio reminder only matters once something is actually being flashed
+    document.getElementById('radio-note').style.display = (board && fw) ? '' : 'none';
+  }
+
+  document.querySelectorAll('[data-board]').forEach(b =>
+    b.addEventListener('click', () => { board = b.dataset.board; render(); }));
+  document.querySelectorAll('[data-fw]').forEach(b =>
+    b.addEventListener('click', () => { fw = b.dataset.fw; render(); }));
+
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pre = btn.parentElement.querySelector('pre');
+      const text = pre ? pre.innerText : '';
+      const done = () => {
+        const old = btn.textContent;
+        btn.textContent = 'Скопировано ✓';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1200);
+      };
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+    });
+  });
+
+  fetch('manifest.json', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(m => { if (m && m.version) document.getElementById('build-version').textContent = 'Версия прошивки: ' + m.version; })
+    .catch(() => {});
+
+  render();
+</script>
+</body>
+</html>

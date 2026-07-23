@@ -7,16 +7,10 @@ external/MeshCore/platformio.local.ini
 
 # build artifacts
 dist/
-# The site under docs/ is assembled at deploy time - firmware images, the
-# rendered guides and the hub itself are all generated, never committed.
-# docs/flash.html is the one hand-written page that lives here.
+# docs/index.html is hand-written and committed. CI drops the freshly built
+# firmware images and the ESP Web Tools manifest next to it at deploy time;
+# those are never committed.
 docs/manifest.json
-docs/index.html
-docs/guide-*.html
-docs/meshlog.py
-docs/app.webmanifest
-docs/icon.svg
-docs/sw.js
 *.uf2
 *.hex
 *.elf
@@ -33,4 +27,3 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
-docs/MESHCORE_*.md
