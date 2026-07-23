@@ -1,0 +1,48 @@
+# Тасклист
+
+Статусы: `[ ]` не начато · `[~]` в работе · `[x]` готово · `[!]` заблокировано / нужен пользователь
+
+## Этап 1 — T114 (nRF52840), companion на аппаратном UART
+- [x] 1.1 Скелет репозитория (submodule MeshCore @ `companion-v1.16.0`, .gitignore, скрипты)
+- [x] 1.2 Патч nRF52-ветки `examples/companion_radio/main.cpp`: `SERIAL_RX`/`SERIAL_TX` → `Serial2` (UARTE1, P0.09/P0.10)
+- [x] 1.3 PlatformIO env `t114_companion_serial` (BLE off, WiFi н/д, display off)
+- [x] 1.4 Локальная сборка + `.uf2` — 875520 Б, старт `0x26000`, Flash 61.4% / RAM 59.5%
+- [ ] 1.5 ГЕЙТ (нужна плата): прошить, подключить GPIO9/10+GND к USB-UART 115200,
+      `python scripts/selftest.py <порт>` → self-info
+
+## Этап 2 — V4 (ESP32-S3)
+- [x] 2.1 PlatformIO env `v4_companion_serial`, флаги `SERIAL_RX=47` / `SERIAL_TX=48`, WiFi+BLE off
+- [x] 2.2 Единый factory-образ через `merge_bin` → `v4-factory.bin` (725152 Б, offset 0)
+- [ ] 2.3 ГЕЙТ (нужна плата): self-info по UART на GPIO47/48
+
+## Этап 3 — GitHub Actions
+- [x] 3.1 Матрица nRF / ESP, кэш PlatformIO
+- [x] 3.2 Триггеры: тег `v*`, push в `main`, `workflow_dispatch`
+- [x] 3.3 Артефакты `t114-companion.uf2`, `v4-factory.bin`, `manifest.json`
+- [ ] 3.4 ГЕЙТ: тег → Release с обоими файлами
+
+## Этап 4 — Страница-флешер (GitHub Pages)
+- [x] 4.1 `docs/index.html`: выбор V4 / T114
+- [x] 4.2 V4 — ESP Web Tools + `manifest.json` (offset 0, ESP32-S3)
+- [x] 4.3 T114 — скачивание `.uf2` + инструкция
+- [x] 4.4 CI кладёт свежие бинари рядом с `index.html` при деплое Pages
+- [ ] 4.5 ГЕЙТ: страница открывается, V4 шьётся кликом, T114 отдаёт `.uf2`
+
+## Оформление
+- [x] 5.1 README
+- [x] 5.2 BUILD.md (env/команды, патчи/флаги, распиновка, проверка self-info)
+- [x] 5.3 Раздел «Ограничения»
+
+## Проверено статически
+- [x] `-D CONFIG_NFCT_PINS_AS_GPIOS` доходит до `system_nrf52840.c` (иначе P0.09/P0.10 остались бы NFC-пинами)
+- [x] В elf V4 — 0 символов BLE/WiFi; в elf T114 нет `SerialBLEInterface`
+- [x] `companion_serial` / `Serial2` присутствуют в соответствующих образах
+- [x] Строка версии из `$FIRMWARE_VERSION` реально попадает в оба бинаря
+
+## Дополнительно (получено по ходу)
+- [ ] 6.1 Вести этот тасклист, не останавливаться до полной проверки и пуша
+- [ ] 6.2 Сайт опубликован на GitHub Pages, открывается и верифицируется
+
+## Открытые вопросы
+- [!] Имя репозитория: origin = `hleserg/hleserg-meshcore-node-fw`, в задаче — `hleserg/meshcore-node-fw`.
+      От этого зависит URL Pages. Пока ориентируюсь на фактический origin.

@@ -1,0 +1,7 @@
+[submodule "external/MeshCore"]
+	path = external/MeshCore
+	url = https://github.com/meshcore-dev/MeshCore.git
+	# Pinned to a release tag rather than tracked against a branch - bump deliberately.
+	# scripts/prepare.py patches this working tree in place, so it is expected to be
+	# dirty; only the recorded commit is meaningful.
+	ignore = dirty

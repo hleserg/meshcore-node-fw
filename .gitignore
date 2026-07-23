@@ -1,0 +1,25 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+external/MeshCore/.pio/
+external/MeshCore/platformio.local.ini
+
+# build artifacts
+dist/
+*.uf2
+*.hex
+*.elf
+*.bin
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
