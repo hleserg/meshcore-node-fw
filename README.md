@@ -91,7 +91,7 @@ Heltec-овский «UART1» — это `NRF_UARTE1`, который ядро A
 | Пароль | `romantika` — **один и тот же на всех нодах** |
 | Адрес | `192.168.4.1` |
 | Порт | `5000` |
-| Логгер | `python meshlog.py --tcp 192.168.4.1:5000` |
+| Логгер | `python meshlog.py --tcp 192.168.4.1:5000` — сам логгер в [flipperMeshCoreConfig](https://github.com/hleserg/flipperMeshCoreConfig) |
 
 Почему точка, а не станция: в лесу и на фесте роутера нет, подключаться некуда, а весь
 полевой процесс завязан на `192.168.4.1:5000`. Стоковая `WIFI_SSID`-сборка MeshCore
