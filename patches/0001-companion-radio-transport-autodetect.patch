@@ -13,7 +13,7 @@ index 0eee45ae..900c90af 100644
    bool hasConnection() const { return _connected; }
    uint16_t getBattMilliVolts() const { return _board->getBattMilliVolts(); }
 diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
-index ef9b6bfc..20b60252 100644
+index ef9b6bfc..6d08ee22 100644
 --- a/examples/companion_radio/main.cpp
 +++ b/examples/companion_radio/main.cpp
 @@ -34,8 +34,60 @@ static uint32_t _atoi(const char* sp) {
@@ -235,7 +235,7 @@ index ef9b6bfc..20b60252 100644
    board.begin();
  
  #ifdef DISPLAY_CLASS
-@@ -156,8 +331,20 @@ void setup() {
+@@ -156,8 +331,26 @@ void setup() {
      #endif
    );
  
@@ -247,6 +247,12 @@ index ef9b6bfc..20b60252 100644
 +    serial_wired.begin(COMPANION_SERIAL);
 +  } else {
 +    serial_wireless.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
++    // Printed here rather than in the boot banner because the name and the
++    // active pin only exist once the mesh has loaded its prefs - the pin can be
++    // changed at runtime, and that override is what actually gets used.
++    Serial.printf("ble       : name=%s%s  pin=%06u\n", BLE_NAME_PREFIX,
++                  the_mesh.getNodePrefs()->node_name, (unsigned)the_mesh.getBLEPin());
++    Serial.flush();
 +  }
 +#elif defined(BLE_PIN_CODE)
    serial_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
@@ -257,7 +263,7 @@ index ef9b6bfc..20b60252 100644
  #else
    serial_interface.begin(Serial);
  #endif
-@@ -199,7 +386,37 @@ void setup() {
+@@ -199,7 +392,37 @@ void setup() {
      #endif
    );
  
