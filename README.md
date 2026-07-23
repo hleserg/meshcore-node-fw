@@ -16,7 +16,7 @@
 
 ## Прошить
 
-**→ [Открыть страницу-флешера](https://hleserg.github.io/hleserg-meshcore-node-fw/)**
+**→ [Открыть страницу-флешера](https://hleserg.github.io/meshcore-node-fw/)**
 
 | Плата | Чип | Как шьётся |
 |---|---|---|

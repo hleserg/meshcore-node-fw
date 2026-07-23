@@ -10,8 +10,8 @@
 - git с сабмодулями
 
 ```bash
-git clone --recurse-submodules https://github.com/hleserg/hleserg-meshcore-node-fw.git
-cd hleserg-meshcore-node-fw
+git clone --recurse-submodules https://github.com/hleserg/meshcore-node-fw.git
+cd meshcore-node-fw
 # если клонировали без --recurse-submodules:
 git submodule update --init --recursive
 ```

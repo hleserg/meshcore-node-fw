@@ -44,5 +44,4 @@
 - [ ] 6.2 Сайт опубликован на GitHub Pages, открывается и верифицируется
 
 ## Открытые вопросы
-- [!] Имя репозитория: origin = `hleserg/hleserg-meshcore-node-fw`, в задаче — `hleserg/meshcore-node-fw`.
-      От этого зависит URL Pages. Пока ориентируюсь на фактический origin.
+- [x] Имя репозитория: репо переименован в `hleserg/meshcore-node-fw`, origin и ссылки обновлены.
