@@ -94,7 +94,8 @@ pio run -e t114_repeater
 -D OFFLINE_QUEUE_SIZE=256
 ```
 
-**В стоке транспорт выбирается препроцессором**, один на сборку:
+**В стоке транспорт выбирается препроцессором**, один на сборку. Эта лесенка —
+**ветка ESP32**:
 
 ```
 #ifdef WIFI_SSID            -> SerialWifiInterface
@@ -102,6 +103,9 @@ pio run -e t114_repeater
 #elif defined(SERIAL_RX)    -> ArduinoSerialInterface на аппаратном UART
 #else                       -> ArduinoSerialInterface на Serial (USB-CDC)
 ```
+
+На **nRF52 у апстрима выбор беднее**: либо `BLE_PIN_CODE` → BLE, либо USB-CDC.
+Ветки hardware-serial там нет вообще — её и добавляет наш патч.
 
 **У нас компилируются обе половины**, и выбор делается в рантайме. Проверено по
 символам в собранных образах:
@@ -114,15 +118,23 @@ pio run -e t114_repeater
 ### T114 companion (nRF52840)
 
 ```
--D TRANSPORT_DETECT_PIN=13   ; P0.13, хедер P1
--D SERIAL_RX=9               ; P0.09
--D SERIAL_TX=10              ; P0.10
--D CONFIG_NFCT_PINS_AS_GPIOS ; освободить NFC-пины
--D BLE_PIN_CODE=123456       ; BLE — беспроводная половина автодетекта
+-D TRANSPORT_DETECT_PIN=33   ; P1 пин 8,  GPIO33 = P1.01
+-D SERIAL_RX=9               ; P1 пин 12, GPIO9  = P0.09
+-D SERIAL_TX=10              ; P1 пин 13, GPIO10 = P0.10
+-D CONFIG_NFCT_PINS_AS_GPIOS ; освободить NFC-пины, иначе UART молча не заработает
+-D BLE_PIN_CODE=534465       ; BLE — беспроводная половина автодетекта
 -D DISPLAY_CLASS=NullDisplayDriver
 board_build.ldscript = boards/nrf52840_s140_v6_extrafs.ld
 board_upload.maximum_size = 712704
 ```
+
+**Пин-код BLE.** Ровно 6 цифр и без ведущего нуля: `SerialBLEInterface` форматирует
+его через `"%lu"` в 6-символьный passkey, больше спецификация BLE не позволяет.
+Апстримный дефолт — `123456`, и на этой плате нет экрана, чтобы показать случайный
+(`NullDisplayDriver::begin()` возвращает `false`, поэтому берётся статический пин).
+Опубликованный дефолт означал бы, что к companion-интерфейсу — чтению переписки,
+отправке сообщений от чужого имени, смене настроек — может подключиться кто угодно
+рядом. Это та же дыра, что закрывает пароль на WiFi у V4. Задаётся в одном месте.
 
 ### V4 companion (ESP32-S3)
 
@@ -139,46 +151,6 @@ board_upload.maximum_size = 712704
 
 Стоковый `simple_repeater`, никаких наших флагов. Патч на него не действует —
 он трогает только `examples/companion_radio/`.
-
-## Патч
-
-Единственный файл: [`patches/0001-companion-radio-hardware-uart.patch`](patches/0001-companion-radio-hardware-uart.patch),
-трогает только `examples/companion_radio/main.cpp`.
-
-**Зачем он нужен.** У апстрима ветка hardware-serial реализована для ESP32 и
-RP2040, но для nRF52 её нет: там либо BLE, либо `serial_interface.begin(Serial)`,
-то есть USB-CDC. Патч добавляет nRF52-ветку и заодно делает выбор UART-периферии
-на ESP32 настраиваемым.
-
-```diff
- #elif defined(NRF52_PLATFORM)
-   #ifdef BLE_PIN_CODE
-     SerialBLEInterface serial_interface;
-+  #elif defined(SERIAL_RX)
-+    ArduinoSerialInterface serial_interface;
-+    #ifndef COMPANION_SERIAL
-+      #define COMPANION_SERIAL Serial2
-+    #endif
-   #else
-     ArduinoSerialInterface serial_interface;
-   #endif
-```
-
-```diff
- #ifdef BLE_PIN_CODE
-   serial_interface.begin(BLE_NAME_PREFIX, ...);
-+#elif defined(NRF52_PLATFORM) && defined(SERIAL_RX)
-+  COMPANION_SERIAL.setPins(SERIAL_RX, SERIAL_TX);
-+  COMPANION_SERIAL.begin(115200);
-+  serial_interface.begin(COMPANION_SERIAL);
- #else
-   serial_interface.begin(Serial);
- #endif
-```
-
-Для ESP32 `HardwareSerial companion_serial(1)` заменён на
-`HardwareSerial companion_serial(COMPANION_SERIAL_NUM)` с дефолтом `1`
-(поведение апстрима не меняется).
 
 ## Распиновка — ЗАФИКСИРОВАНА
 
@@ -246,6 +218,22 @@ USB-логе — в поле вспоминать не нужно.
 Если `esp_wifi` откажется поднимать точку (например, пароль короче 8 символов), прошивка
 напечатает `*** FAILED TO START ***` в лог, а не молча поднимет открытую сеть.
 
+## Общие секреты — где заданы
+
+Три значения, одинаковые на всех нодах. Каждое — в одном месте,
+`pio/meshcore-node-fw.ini`, меняется одной правкой.
+
+| Что | Значение | Флаг | Где |
+|---|---|---|---|
+| Пароль WiFi-точки (V4) | `romantika` | `WIFI_AP_PASSWORD` | `[env:v4_companion]` |
+| Пин-код BLE (T114) | `534465` | `BLE_PIN_CODE` | `[env:t114_companion]` |
+| Админ-пароль репитера | `password` | `ADMIN_PASSWORD` | `[env:t114_repeater]` |
+
+⚠️ Админ-пароль репитера — **апстримный дефолт MeshCore**, он не менялся. Это
+опубликованное значение: кто угодно в радиусе слышимости может залогиниться в
+репитер и менять его настройки. Либо смените его на ноде после прошивки, либо
+задайте своё значение этим флагом.
+
 ## NFC-пины — обязательная проверка
 
 `P0.09`/`P0.10` на nRF52840 после сброса сконфигурированы как выводы NFC-антенны, а не
@@ -301,23 +289,29 @@ companion-протоколом; в прошивку они не зашиты.
 
 | Файл | Что это |
 |---|---|
-| `dist/t114-companion.uf2` | Образ для UF2-бутлоадера, старт `0x26000` (после SoftDevice S140 v6) |
-| `dist/v4-factory.bin` | bootloader + partitions + boot_app0 + приложение одним куском, пишется с offset `0` |
+| `dist/t114-companion.uf2` | T114 companion, UF2, старт `0x26000` (после SoftDevice S140 v6) |
+| `dist/v4-companion-factory.bin` | V4 companion: bootloader + partitions + boot_app0 + приложение одним куском, пишется с offset `0` |
+| `dist/t114-repeater.uf2` | T114 стоковый репитер, UF2 |
 | `dist/manifest.json` | Манифест ESP Web Tools для страницы-флешера |
 
-`v4-factory.bin` собирается апстримным `merge-bin.py` (`pio run -t mergebin`) —
+`v4-companion-factory.bin` собирается апстримным `merge-bin.py` (`pio run -t mergebin`) —
 именно он нужен ESP Web Tools, потому что тот пишет один файл по нулевому смещению.
 
 ## CI
 
 `.github/workflows/build.yml`:
 
-- **триггеры** — push тега `v*`, push в `main`, ручной `workflow_dispatch`;
-- **матрица** — два независимых job'а (nRF52 и ESP32), кэш `~/.platformio`;
-- на теге — job `release`: создаёт Release и прикладывает `t114-companion.uf2`,
-  `v4-factory.bin`, `manifest.json`;
-- всегда — job `pages`: кладёт свежие бинари рядом с `docs/index.html` и
-  деплоит GitHub Pages, чтобы страница отдавала актуальные образы.
+- **триггеры** — push в `main`, push тега `v*`, pull request в `main`, ручной
+  `workflow_dispatch`;
+- **матрица** — три независимых job'а: `t114`, `v4`, `t114rep`; кэш `~/.platformio`;
+- **на теге** — job `release`: создаёт Release и прикладывает `t114-companion.uf2`,
+  `v4-companion-factory.bin`, `t114-repeater.uf2`, `manifest.json`;
+- **на push в `main`** — job `pages`: кладёт свежие бинари рядом с `docs/index.html`
+  и деплоит GitHub Pages;
+- **на pull request** — только сборка. Ни Pages, ни Release с PR не запускаются,
+  иначе любой PR публиковался бы на живой сайт;
+- **на теге Pages НЕ деплоится**: тег указывает на коммит, который уже в `main`,
+  и оба рана дрались бы за окружение `github-pages`.
 
 ## Патч автодетекта
 
@@ -367,11 +361,23 @@ serial_interface_ptr = transport_is_wired ? &serial_wired : &serial_wireless;
 ```
 === MeshCore companion :: transport auto-detect ===
 firmware  : v0.2.0-… (…)
-detect    : arduino 13  -> P0.13
+DETECT=GPIO33 (P1 pin 8) = LOW -> ble | UART RX=GPIO9 (P1 pin 12), TX=GPIO10 (P1 pin 13)
+detect    : arduino 33  -> P1.01
 detect    : LOW (nothing wired)
 transport : BLE
 note      : pull the detect pin HIGH and reboot to use the wire
 ==================================================
+ble       : name=MeshCore-POCKET-M  pin=534465
+```
+
+На V4 без провода вместо двух последних строк будет:
+
+```
+transport : WiFi access point + TCP server
+tcp port  : 5000
+ap addr   : 192.168.4.1 (once the AP is up)
+wifi ap   : SSID=MeshCore-ROVER-M  pass=romantika
+logger    : 192.168.4.1:5000
 ```
 
 С подключённым проводом строки станут `HIGH (something wired)` и `HARDWARE UART`, плюс

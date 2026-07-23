@@ -2,7 +2,8 @@
 """Build the meshcore-node-fw firmwares and collect flashable artifacts.
 
     python scripts/build.py t114     -> dist/t114-companion.uf2
-    python scripts/build.py v4       -> dist/v4-factory.bin  + dist/manifest.json
+    python scripts/build.py v4       -> dist/v4-companion-factory.bin + manifest.json
+    python scripts/build.py t114rep  -> dist/t114-repeater.uf2
     python scripts/build.py all
 
 The version stamped into the firmware (and reported over the companion protocol
